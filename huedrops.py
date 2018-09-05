@@ -1,3 +1,6 @@
+from collections import namedtuple
+
+
 class Hue:
     def __init__(self, x, y, label, connections=None):
         self.label = label
@@ -14,18 +17,18 @@ class HueDropsSolver:
                              visited=None,
                              border_elements=None):
         if visited is None:
-            visited = []
+            visited = set()
         if border_elements is None:
-            border_elements = []
+            border_elements = set()
 
-        visited.append(hue)
+        visited.add(hue)
 
         # adjacent hues are adjacent hues of same color
         adj_hues = [c for c in hue.connections
                     if c.label == hue.label and c not in visited]
 
         # border elements are adjacent hues of other colors
-        border_elements.extend([c for c in hue.connections
+        border_elements.update([c for c in hue.connections
                                 if c.label != hue.label
                                 and c not in border_elements])
 
@@ -38,40 +41,63 @@ class HueDropsSolver:
         return path_len
 
     def get_solution(self, show_steps=False):
-        result = []
-        while True:
-            visited = []
-            borders = []
 
-            # first we visit all hues of top-left color to get border elements
-            self.walk_same_color_hues(self.hue_drops_board.board[(0, 0)],
-                                      border_elements=borders,
-                                      visited=visited)
+        WalkResults = namedtuple('WalkResults', ['visited', 'border'])
+
+        result = []
+        paths = {}
+        visited = set()
+        borders = set()
+
+        while True:
+
+            summed_up_paths = {}
+
+            # for the very first time we visit all hues of top-left color to get border elements
+            # then we will used visited hues from previous steps
+            if not visited:
+                self.walk_same_color_hues(self.hue_drops_board.board[(0, 0)],
+                                          border_elements=borders,
+                                          visited=visited)
 
             # all hues have been visited => they all have got same color => finished
             hues_count = self.hue_drops_board.width * self.hue_drops_board.height
-            if len(set(visited)) >= hues_count:
+            if len(visited) >= hues_count:
                 break
 
             # now we calculate path lengths for all border hues
-            paths = {}
+            # visited and border elements are saved to a dict to avoid duplicate calculations
             for border_hue in borders:
-                border_visited = []
-                self.walk_same_color_hues(border_hue,
-                                          visited=border_visited)
+                border_hue_visited = set()
+                border_hue_border = set()
+                if border_hue not in paths:
+                    self.walk_same_color_hues(border_hue,
+                                              visited=border_hue_visited,
+                                              border_elements=border_hue_border)
+                    paths[border_hue] = WalkResults(visited=border_hue_visited, border=border_hue_border)
+                else:
+                    border_hue_visited = paths[border_hue].visited
+                    border_hue_border = paths[border_hue].border
 
                 # we summarize results for same color
                 # (after new color is filled they all will be joined)
-                if border_hue.label in paths:
-                    paths[border_hue.label].update(border_visited)
+                if border_hue.label in summed_up_paths:
+                    summed_up_paths[border_hue.label].visited.update(border_hue_visited)
+                    summed_up_paths[border_hue.label].border.update(border_hue_border)
                 else:
-                    paths[border_hue.label] = set(border_visited)
+                    summed_up_paths[border_hue.label] = WalkResults(border_hue_visited, border_hue_border)
 
-            best_path_label = max(paths, key=lambda x: len(paths[x]))
+            best_path_label = max(summed_up_paths, key=lambda x: len(summed_up_paths[x].visited))
+
+            visited.update(summed_up_paths[best_path_label].visited)
+            borders.update(summed_up_paths[best_path_label].border)
+            borders = borders - visited
 
             # filling new color
+            # hue's visited and border have to be recalculated if it has changed its color
             for v in visited:
                 v.label = best_path_label
+                paths.pop(v, None)
 
             result.append(self.hue_drops_board.board[(0, 0)].label)
 
@@ -124,4 +150,13 @@ class HueDropsBoard:
             if len(row) != width:
                 raise ValueError('Wrong length of input row')
             board_input.append(row)
+        return HueDropsBoard(width, height, board_input)
+
+    @classmethod
+    def create_from_file(cls, file):
+        width, height = map(int, input().split(" "))
+        board_input = []
+        with open(file, 'r') as board_file:
+            for line in board_file:
+                board_input.append(line.rstrip().split(" "))
         return HueDropsBoard(width, height, board_input)
